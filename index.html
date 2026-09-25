@@ -196,7 +196,7 @@ renderer=new THREE.WebGLRenderer({canvas,antialias:true});
 renderer=new THREE.WebGLRenderer({canvas,antialias:false});
 }
 renderer.setSize(innerWidth,innerHeight);
-renderer.setPixelRatio(Math.min(2,devicePixelRatio||1));
+renderer.setPixelRatio(Math.min(1.2,devicePixelRatio||1));
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 scene=new THREE.Scene();
@@ -208,9 +208,9 @@ scene.add(hemi);
 sunLight=new THREE.DirectionalLight(0xfff2d9,1.6);
 sunLight.position.set(900,1400,600);
 sunLight.castShadow=true;
-sunLight.shadow.mapSize.set(2048,2048);
-sunLight.shadow.camera.left=-600;sunLight.shadow.camera.right=600;
-sunLight.shadow.camera.top=600;sunLight.shadow.camera.bottom=-600;
+sunLight.shadow.mapSize.set(1024,1024);
+sunLight.shadow.camera.left=-350;sunLight.shadow.camera.right=350;
+sunLight.shadow.camera.top=350;sunLight.shadow.camera.bottom=-350;
 sunLight.shadow.camera.far=4000;
 scene.add(sunLight);
 scene.add(new THREE.AmbientLight(0xffffff,.15));
@@ -373,6 +373,21 @@ const H=40,T=20;
 const mk=(w,d,x,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,H,d),wallMat);m.position.set(x,H/2,z);scene.add(m);};
 mk(WORLD+100,T,0,-HALF);mk(WORLD+100,T,0,HALF);mk(T,WORLD+100,-HALF,0);mk(T,WORLD+100,HALF,0);
 }
+function buildingTexture(hex){
+// پنجره‌ها روی تکسچر کشیده میشن تا صدها مش جدا ساخته نشه (FPS بالاتر)
+const c=document.createElement('canvas');c.width=128;c.height=128;
+const x=c.getContext('2d');
+x.fillStyle=hex;x.fillRect(0,0,128,128);
+x.fillStyle='#00000030';
+for(let yy=0;yy<128;yy+=12)x.fillRect(0,yy,128,2);
+const cols=4,rows=5;
+for(let r=0;r<rows;r++)for(let q=0;q<cols;q++){
+x.fillStyle=Math.random()<.4?'#ffdf6b':'#0e1319';
+const ww=128/cols,hh=128/rows;
+x.fillRect(q*ww+ww*.22,r*hh+hh*.25,ww*.56,hh*.5);
+}
+return new THREE.CanvasTexture(c);
+}
 // cities + buildings
 const cities=[{x:0,z:0},{x:-HALF*.5,z:-HALF*.45},{x:HALF*.5,z:-HALF*.5},{x:-HALF*.45,z:HALF*.5},{x:HALF*.48,z:HALF*.48}];
 const names=['Hospital','Police','Market','Hotel','Bank','Tower','Depot','School'];
@@ -380,24 +395,16 @@ cities.forEach((c,ci)=>{
 for(let i=0;i<7;i++){
 const w=R(90,200),d=R(90,200),h=R(50,150);
 const x=c.x+R(-420,420),z=c.z+R(-420,420);
-const col=new THREE.Color().setHSL(.58+Math.random()*.06,.16,.28+Math.random()*.14);
+const col=new THREE.Color().setHSL(.58+Math.random()*.06,.16,.3+Math.random()*.14);
 const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
-new THREE.MeshStandardMaterial({color:col,roughness:.85}));
+new THREE.MeshStandardMaterial({map:buildingTexture('#'+col.getHexString()),roughness:.9}));
 m.position.set(x,h/2,z);m.castShadow=true;m.receiveShadow=true;scene.add(m);buildMeshes.push(m);
 colliders.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,h});
 // roof edge
 const roof=new THREE.Mesh(new THREE.BoxGeometry(w+4,4,d+4),
 new THREE.MeshStandardMaterial({color:0x1c2128}));
 roof.position.set(x,h+2,z);scene.add(roof);
-// windows glow
-const winMat=new THREE.MeshStandardMaterial({color:0x111111,emissive:0xffd75e,emissiveIntensity:.55});
-for(let wy=12;wy<h-8;wy+=22){
-for(let wx=-w/2+12;wx<w/2-8;wx+=26){
-const win=new THREE.Mesh(new THREE.PlaneGeometry(12,8),winMat);
-win.position.set(x+wx,wy,z+d/2+.3);scene.add(win);
-const win2=win.clone();win2.rotation.y=Math.PI;win2.position.set(x+wx,wy,z-d/2-.3);scene.add(win2);
-}
-}
+// windows baked into texture (perf)
 // door
 const door=new THREE.Mesh(new THREE.PlaneGeometry(22,34),new THREE.MeshStandardMaterial({color:0xc8ff00,emissive:0x334400,emissiveIntensity:.5}));
 door.position.set(x,h*.2,z+d/2+.4);scene.add(door);
@@ -495,15 +502,30 @@ const P=G.player;if(!P)return;
 const gun=P.guns[P.cur];if(!gun)return;
 gunView=new THREE.Group();
 const wcol=WEAPONS[gun.key].color;
-const body=new THREE.Mesh(new THREE.BoxGeometry(.12,.16,WEAPONS[gun.key].len*.55),
-new THREE.MeshStandardMaterial({color:0x191919,roughness:.5}));
-gunView.add(body);
-const glow=new THREE.Mesh(new THREE.BoxGeometry(.125,.06,.25),
-new THREE.MeshStandardMaterial({color:wcol,emissive:wcol,emissiveIntensity:1}));
-glow.position.set(0,.05,-.45);gunView.add(glow);
-const sight=new THREE.Mesh(new THREE.BoxGeometry(.03,.09,.08),new THREE.MeshBasicMaterial({color:0xc8ff00}));
-sight.position.set(0,.13,-.2);gunView.add(sight);
-gunFlash=new THREE.PointLight(0xffdd66,0,18);
+const L=WEAPONS[gun.key].len, s=L/1.7;
+const dark=new THREE.MeshStandardMaterial({color:0x1b1d20,roughness:.45,metalness:.35});
+const mid=new THREE.MeshStandardMaterial({color:0x2e3238,roughness:.6,metalness:.2});
+const gripM=new THREE.MeshStandardMaterial({color:0x4a3420,roughness:.9});
+const skin=new THREE.MeshStandardMaterial({color:0xd9a877,roughness:.8});
+function part(geo,mat,x,y,z,rx){const mm=new THREE.Mesh(geo,mat);mm.position.set(x,y,z);if(rx)mm.rotation.x=rx;gunView.add(mm);return mm;}
+part(new THREE.BoxGeometry(.13,.17,.62*s),dark,0,0,-.1); // بدنه
+part(new THREE.BoxGeometry(.11,.1,.5*s),mid,0,.02,-.62); // هندگارد
+part(new THREE.BoxGeometry(.05,.03,.8*s),mid,0,.115,-.3); // ریل بالا
+part(new THREE.BoxGeometry(.04,.08,.06),dark,0,.16,-.08); // سایت عقب
+part(new THREE.BoxGeometry(.025,.07,.025),dark,0,.15,-.62); // سایت جلو
+part(new THREE.BoxGeometry(.02,.02,.02),new THREE.MeshBasicMaterial({color:0xc8ff00}),0,.155,-.62); // نقطه شب‌نما
+part(new THREE.BoxGeometry(.13,.05,.22),new THREE.MeshStandardMaterial({color:wcol,emissive:wcol,emissiveIntensity:.9}),0,.06,-.42); // نوار نورانی
+part(new THREE.CylinderGeometry(.028,.028,.34*s,8),dark,0,.01,-.95,Math.PI/2); // لوله
+part(new THREE.CylinderGeometry(.045,.045,.1,8),mid,0,.01,-1.1,Math.PI/2); // شعله‌پوش
+part(new THREE.BoxGeometry(.11,.2,.3*s),gripM,0,-.02,.32); // قنداق
+part(new THREE.BoxGeometry(.12,.24,.06),dark,0,-.03,.48); // ته قنداق
+part(new THREE.BoxGeometry(.1,.22,.12),gripM,0,-.18,.02,.35); // دستگیره
+part(new THREE.BoxGeometry(.09,.26,.14),mid,0,-.2,-.22,.25); // خشاب
+part(new THREE.BoxGeometry(.02,.08,.05),dark,0,-.12,-.06); // ماشه
+part(new THREE.BoxGeometry(.1,.03,.2),dark,0,-.15,-.05); // گارد ماشه
+part(new THREE.BoxGeometry(.11,.12,.16),skin,.02,-.1,-.5); // دست جلو
+part(new THREE.BoxGeometry(.11,.13,.15),skin,0,-.14,.02); // دست ماشه
+gunFlash=new THREE.PointLight(0xffdd66,0,20);
 gunFlash.position.set(0,.1,-1);gunView.add(gunFlash);
 gunView.position.set(.42,-.38,-.85);
 camera.add(gunView);
@@ -523,10 +545,11 @@ refreshGunView();
 for(let i=0;i<24;i++){
 const keys=['ar','smg','shotgun','sniper','lmg','pistol'];
 let bx=0,bz=0;for(let t=0;t<30;t++){bx=R(-HALF+150,HALF-150);bz=R(-HALF+150,HALF-150);if(!collideXZ(bx,bz,20))break;}
-const b={x:bx,y:0,z:bz,r:9,hp:100,armor:Math.random()<.5?50:0,alive:true,name:BOT_NAMES[i]||('Bot'+i),
+const b={x:bx,y:0,z:bz,r:13,hp:100,armor:Math.random()<.5?50:0,alive:true,name:BOT_NAMES[i]||('Bot'+i),
 angle:R(0,6.28),pitch:0,speed:75+Math.random()*40,guns:[mkGun(keys[i%keys.length])],cur:0,
 aiT:Math.random()*2,tgt:null,strafe:Math.random()<.5?1:-1,medkits:1,kills:0,mesh:makeSoldier(false),
 animT:Math.random()*5,animSpeed:0,vy:0,ground:true,skill:.5+Math.random()*.7};
+b.mesh.scale.setScalar(1.65); // دشمن‌های درشت‌تر و دیده‌شونده‌تر
 scene.add(b.mesh);G.bots.push(b);
 }
 spawnLoot(150);
@@ -684,6 +707,14 @@ setTimeout(()=>{d.style.transition='opacity .5s';d.style.opacity='0';setTimeout(
 }
 // ================= COMBAT =================
 const tmpV=new THREE.Vector3();
+// مش و متریال مشترک (پرفورمنس: بدون ساخت آبجکت در هر شلیک)
+const GEO_TRACER=new THREE.BoxGeometry(.32,.32,8);
+const TRACER_MATS={};
+function tracerMat(c){if(!TRACER_MATS[c])TRACER_MATS[c]=new THREE.MeshBasicMaterial({color:c});return TRACER_MATS[c];}
+const GEO_DOT=new THREE.SphereGeometry(1,6,5);
+const MAT_BLOOD=new THREE.MeshBasicMaterial({color:0xcc0000,transparent:true});
+const MAT_FLASH=new THREE.MeshBasicMaterial({color:0xfff200,transparent:true});
+const MAT_SPARK=new THREE.MeshBasicMaterial({color:0xffcc66,transparent:true});
 function shoot(p){
 const g=p.guns[p.cur];if(!g||!p.alive||g.reloading>0)return;
 const now=performance.now()/1000;const interval=60/g.rpm;
@@ -692,7 +723,7 @@ if(g.ammo<=0){startReload(p);return;}
 g.lastShot=now;g.ammo--;
 const pellets=g.pellets||1;
 const isMe=p===G.player;
-const eyeY=p.y+(isMe?4.2:1.7);
+const eyeY=p.y+(isMe?4.2:2.8);
 for(let i=0;i<pellets;i++){
 const sp=g.spread*(isMe&&G.scope?0.35:1);
 const a=p.angle+(Math.random()-.5)*sp*2;
@@ -703,17 +734,14 @@ G.tracers.push({x:p.x+dx*8,y:eyeY,z:p.z+dz*8,vx:dx*speed,vy:dy*speed,vz:dz*speed
 life:g.range/speed,dmg:g.dmg*(0.9+Math.random()*.2),from:p,head:Math.random()<.18,
 mesh:null,color:g.color});
 const tr=G.tracers[G.tracers.length-1];
-const geo=new THREE.BoxGeometry(.32,.32,8);
-const mat=new THREE.MeshBasicMaterial({color:g.color});
-const m=new THREE.Mesh(geo,mat);m.position.set(tr.x,tr.y,tr.z);
+const m=new THREE.Mesh(GEO_TRACER,tracerMat(g.color));m.position.set(tr.x,tr.y,tr.z);
 m.lookAt(tr.x+tr.vx,tr.y+tr.vy,tr.z+tr.vz);scene.add(m);tr.mesh=m;
 }
 // muzzle flash
 G.particles.push({x:p.x-Math.sin(p.angle)*10,y:eyeY,z:p.z-Math.cos(p.angle)*10,
-vx:0,vy:20,vz:0,life:.07,max:.07,
-mesh:new THREE.Mesh(new THREE.SphereGeometry(3.2,8,6),
-new THREE.MeshBasicMaterial({color:0xfff200,transparent:true}))});
+vx:0,vy:20,vz:0,life:.07,max:.07,mesh:new THREE.Mesh(GEO_DOT,MAT_FLASH)});
 scene.add(G.particles[G.particles.length-1].mesh);
+G.particles[G.particles.length-1].mesh.scale.setScalar(3);
 if(isMe){
 if(gunFlash)gunFlash.intensity=8;
 if(gunView)gunView.position.z-=.12;
@@ -725,7 +753,7 @@ let rem=dmg*(isHead?(atk.guns[atk.cur]?.head||2):1);
 if(vic.armor>0){const ab=Math.min(vic.armor,rem*.6);vic.armor-=ab;rem-=ab;}
 vic.hp-=rem;
 for(let i=0;i<3;i++)G.particles.push({x:vic.x,y:vic.y+1.5,z:vic.z,vx:R(-120,120),vy:R(40,200),vz:R(-120,120),
-life:.5,max:.5,mesh:new THREE.Mesh(new THREE.SphereGeometry(.9,5,4),new THREE.MeshBasicMaterial({color:0xcc0000,transparent:true}))}),
+life:.5,max:.5,mesh:new THREE.Mesh(GEO_DOT,MAT_BLOOD)}),
 scene.add(G.particles[G.particles.length-1].mesh);
 if(vic===G.player){
 sfx('hurt');
@@ -905,7 +933,7 @@ let dead=tr.life<=0||tr.y<0||tr.y>400;
 if(!dead&&rayHitBuilding(tr.x-tr.vx*dt,tr.y-tr.vy*dt,tr.z-tr.vz*dt,tr.x,tr.y,tr.z)){
 dead=true;
 G.particles.push({x:tr.x,y:tr.y,z:tr.z,vx:R(-80,80),vy:R(20,140),vz:R(-80,80),life:.3,max:.3,
-mesh:new THREE.Mesh(new THREE.SphereGeometry(.8,5,4),new THREE.MeshBasicMaterial({color:0xffcc66,transparent:true}))});
+mesh:new THREE.Mesh(GEO_DOT,MAT_SPARK)});
 scene.add(G.particles[G.particles.length-1].mesh);
 }
 if(!dead){
@@ -913,9 +941,9 @@ const targets=[...G.bots.filter(b=>b.alive),...(P.alive?[P]:[])];
 for(const e of targets){
 if(e===tr.from)continue;
 const isMeTarget=e===G.player;
-const targetH=e.y+(isMeTarget?2.6:1.4);
+const targetH=e.y+(isMeTarget?2.6:2.3);
 const dx=e.x-tr.x,dy=targetH-tr.y,dz=e.z-tr.z;
-const rad2=isMeTarget?170:120;
+const rad2=isMeTarget?170:210;
 if(dx*dx+dy*dy+dz*dz<rad2){
 let isHead=tr.head;
 if(tr.from===G.player){G.hits++;if(isHead)G.headshots++;}
@@ -938,6 +966,7 @@ p.mesh.material.opacity=Math.max(0,p.life/p.max);
 p.mesh.scale.setScalar(.5+p.life);}
 if(p.life<=0){if(p.mesh)scene.remove(p.mesh);G.particles.splice(i,1);}
 }
+while(G.particles.length>220){const q=G.particles.shift();if(q.mesh)scene.remove(q.mesh);}
 // --- pickups spin ---
 for(const k of G.pickups){
 if(k.mesh){k.mesh.rotation.y+=dt*1.6;k.mesh.position.y=6+Math.sin(time*2+k.x)*2;}
